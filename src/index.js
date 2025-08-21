@@ -32,8 +32,8 @@ const executeRawCommands = async (filePath, db) => {
 
 // Function to load and run migration files from a directory
 const loadAndRunReleases = async (releaseDir, db) => {
-  const releasePath = path.resolve(__dirname, releaseDir); // Resolve the full path to the release directory
-  console.log('Scanning releases directory:', releasePath); // Debug log the path being scanned
+  const releasePath = path.resolve(releaseDir); // Convert releaseDir to absolute path
+  console.log('Scanning releases directory:', releasePath); // Debug log the absolute path
 
   try {
     const versions = fs.readdirSync(releasePath); // Read all subdirectories (versions) inside
@@ -62,21 +62,28 @@ const runMigrations = async () => {
     const db = client.db(dbName);
     console.log(`Connected to database: ${dbName}`);
 
-    // Load and apply weekly releases
-    console.log('Applying Weekly Releases...');
-    await loadAndRunReleases('../releases/weekly', db);
+    // Resolve the absolute path to the `releases` folder
+    const baseReleasesPath = path.resolve(__dirname, '../releases');
 
-    // Load and apply monthly releases
+    // Start the weekly migrations
+    console.log('Applying Weekly Releases...');
+    await loadAndRunReleases(path.join(baseReleasesPath, 'weekly'), db);
+
+    // Start the monthly migrations
     console.log('Applying Monthly Releases...');
-    await loadAndRunReleases('../releases/monthly', db);
+    await loadAndRunReleases(path.join(baseReleasesPath, 'monthly'), db);
 
     console.log('All migrations completed successfully!');
   } catch (err) {
     console.error('❌ Migration failed!', err);
   } finally {
-    // Ensure the MongoDB connection is closed
-    await client.close();
-    console.log('🔒 MongoDB connection closed.');
+    try {
+      console.log('Closing all sessions and database connections...');
+      await client.close(); // Close the MongoDB client gracefully
+      console.log('🔒 MongoDB connection has been closed.');
+    } catch (err) {
+      console.error('Error while closing the MongoDB connection:', err);
+    }
   }
 };
 
