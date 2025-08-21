@@ -14,7 +14,7 @@ let client;
 // Function to execute MongoDB raw commands from a file
 const executeRawCommands = async (filePath, db) => {
   console.log(`Processing file: ${filePath}`);
-  
+
   // Read file content
   const fileContent = fs.readFileSync(filePath, 'utf-8');
   const commands = fileContent.split(';\n').filter((cmd) => cmd.trim() !== ''); // Split commands by `;`
@@ -23,7 +23,11 @@ const executeRawCommands = async (filePath, db) => {
   for (const command of commands) {
     try {
       console.log(`Executing: ${command}`);
-      await eval(`(async () => { ${command} })()`); // Execute the raw MongoDB command
+      // Make db available in the eval context and ensure proper async handling
+      await eval(`(async () => { 
+        const db = arguments[0]; 
+        ${command} 
+      })()`).call(null, db);
     } catch (err) {
       console.error(`Error executing command: ${command}`, err);
       throw err;
@@ -36,18 +40,16 @@ const loadAndRunReleases = async (releaseDir, db) => {
   const releasePath = path.resolve(releaseDir); // Resolve the absolute path for the directory
   console.log('Scanning releases directory:', releasePath);
 
-  const migrationTasks = []; // Store all migration tasks (promises)
-  
   try {
     const versions = fs.readdirSync(releasePath); // Get all version subdirectories
-    
+
+    // Execute migrations sequentially to avoid session conflicts
     for (const version of versions) {
       const migrationFilePath = path.join(releasePath, version, 'mongodb.js'); // Compute the path to `mongodb.js`
 
       if (fs.existsSync(migrationFilePath)) {
         console.log(`Applying migration for version: ${version}`);
-        const task = executeRawCommands(migrationFilePath, db); // Start migration as a task
-        migrationTasks.push(task); // Add to the list of tasks
+        await executeRawCommands(migrationFilePath, db); // Execute sequentially
       } else {
         console.warn(`No mongodb.js file found for release version ${version}`);
       }
@@ -57,8 +59,6 @@ const loadAndRunReleases = async (releaseDir, db) => {
     throw err;
   }
 
-  // Wait for all migrations in this directory to complete
-  await Promise.all(migrationTasks);
   console.log(`All migrations for ${releaseDir} completed.`);
 };
 
@@ -83,14 +83,16 @@ const runMigrations = async () => {
     await loadAndRunReleases(path.join(baseReleasesPath, 'monthly'), db);
 
     console.log('All migrations completed successfully!');
-    
+
   } catch (err) {
     console.error('❌ Migration failed!', err);
   } finally {
     try {
       console.log('Closing database connections...');
-      if (client) await client.close(); // Close the MongoDB client connection
-      console.log('🔒 MongoDB connection has been closed.');
+      if (client) {
+        await client.close(); // Close the MongoDB client connection
+        console.log('🔒 MongoDB connection has been closed.');
+      }
     } catch (err) {
       console.error('Error while closing MongoDB connection:', err);
     }
