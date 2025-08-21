@@ -1,89 +1,73 @@
-const { MongoClient } = require("mongodb");
-const { Mongock } = require("@mongock/core");
-const { MongoDbDriver } = require("@mongock/mongodb-driver");
-const fs = require("fs");
-const path = require("path");
+const { MongoClient } = require('mongodb');
+const fs = require('fs');
+const path = require('path');
 
-/**
- * MongoDB Connection Details (for POC only)
- */
-const username = "praveents";
-const password = "EkafqheY5FzPgwyK";
-const databaseName = process.env.MY_DATABASE || "testDatabase"; // Default DB
-const mongoUri = `mongodb://${username}:${password}@localhost:27017`; // MongoDB URI
+// MongoDB connection configuration
+const username = 'praveents';
+const password = 'EkafqheY5FzPgwyK';
+const databaseName = process.env.MY_DATABASE || 'testDatabase';
+const mongoUri = `mongodb://${username}:${password}@localhost:27017`;
+
 const client = new MongoClient(mongoUri);
 
-/**
- * Function to Execute Raw MongoDB Commands
- * Reads content of `mongodb.js` and executes its commands line by line
- */
+// Function to execute MongoDB raw commands
 const executeRawCommands = async (filePath, db) => {
-  try {
-    // Read file content synchronously
-    const fileContent = fs.readFileSync(filePath, "utf-8");
-
-    const commands = fileContent.split(";\n").filter((cmd) => cmd.trim() !== ""); // Split commands by ';'
-
-    // Execute each command using the `db` object
-    for (const command of commands) {
+  console.log(`Processing file: ${filePath}`);
+  const fileContent = fs.readFileSync(filePath, 'utf-8');
+  const commands = fileContent.split(';\n').filter((cmd) => cmd.trim() !== ''); // Split commands by `;`
+  
+  for (const command of commands) {
+    try {
       console.log(`Executing: ${command}`);
       await eval(`(async () => { ${command} })()`);
+    } catch (err) {
+      console.error(`Error executing command: ${command}`, err);
+      throw err;
     }
-
-    console.log(`✅ Migration for ${filePath} applied successfully.`);
-  } catch (error) {
-    console.error(`❌ Failed to execute commands from ${filePath}:`, error);
-    throw error;
   }
 };
 
-/**
- * Function to Load and Run Migrations from Release Folders
- */
+// Function to load and run migration files from a release folder
 const loadAndRunReleases = async (releaseDir, db) => {
-  const releasePath = path.resolve(__dirname, releaseDir);
-  const versions = fs.readdirSync(releasePath);
+  const releasePath = path.resolve(releaseDir);
+  const versions = fs.readdirSync(releasePath); // List all release folders
 
   for (const version of versions) {
-    const migrationFilePath = path.resolve(releasePath, version, "mongodb.js");
+    const migrationFilePath = path.join(releasePath, version, 'mongodb.js');
     if (fs.existsSync(migrationFilePath)) {
-      console.log(`Applying migration from: ${migrationFilePath}`);
+      console.log(`Applying migration for version: ${version}`);
       await executeRawCommands(migrationFilePath, db); // Execute the file
+      console.log(`Migration for version ${version} applied successfully.`);
     } else {
-      console.warn(`No migration file found for release ${version}`);
+      console.warn(`No migration file found for version ${version}`);
     }
   }
 };
 
-/**
- * Main Runner Function
- */
+// Main runner function
 const runMigrations = async () => {
   try {
-    await client.connect();
-    const db = client.db(databaseName); // Connect to the specified database
-    console.log(`Connected to MongoDB database: ${databaseName}`);
+    await client.connect(); // Connect to MongoDB
+    const db = client.db(databaseName);
 
-    // Mongock setup to track migrations
-    const driver = new MongoDbDriver(client, db);
-    const mongock = new Mongock({ driver });
+    console.log(`Connected to database: ${databaseName}`);
 
-    // Apply weekly releases
-    console.log("Starting weekly migrations...");
-    await loadAndRunReleases("../releases/weekly", db);
+    // Apply Weekly Releases
+    console.log('Applying Weekly Releases...');
+    await loadAndRunReleases('../releases/weekly', db);
 
-    // Apply monthly releases
-    console.log("Starting monthly migrations...");
-    await loadAndRunReleases("../releases/monthly", db);
+    // Apply Monthly Releases
+    console.log('Applying Monthly Releases...');
+    await loadAndRunReleases('../releases/monthly', db);
 
-    console.log("All migrations executed successfully!");
-  } catch (error) {
-    console.error("❌ Migration process failed:", error);
+    console.log('All migrations completed successfully!');
+  } catch (err) {
+    console.error('❌ Migration failed!', err);
   } finally {
     await client.close();
-    console.log("MongoDB connection closed.");
+    console.log('🔒 MongoDB connection closed.');
   }
 };
 
-// Run the migrations
+// Run migrations
 runMigrations();
