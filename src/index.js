@@ -9,20 +9,21 @@ const dbName = process.env.MY_DATABASE || 'testDatabase';
 const mongoUri = `mongodb://${username}:${password}@localhost:27017`;
 
 // MongoDB client
-const client = new MongoClient(mongoUri);
+let client;
 
-// Function to execute raw MongoDB commands from a file
+// Function to execute MongoDB raw commands from a file
 const executeRawCommands = async (filePath, db) => {
   console.log(`Processing file: ${filePath}`);
   
-  // Read the content of the file
+  // Read file content
   const fileContent = fs.readFileSync(filePath, 'utf-8');
   const commands = fileContent.split(';\n').filter((cmd) => cmd.trim() !== ''); // Split commands by `;`
 
+  // Execute each command
   for (const command of commands) {
     try {
       console.log(`Executing: ${command}`);
-      await eval(`(async () => { ${command} })()`);
+      await eval(`(async () => { ${command} })()`); // Execute the raw MongoDB command
     } catch (err) {
       console.error(`Error executing command: ${command}`, err);
       throw err;
@@ -32,17 +33,21 @@ const executeRawCommands = async (filePath, db) => {
 
 // Function to load and run migration files from a directory
 const loadAndRunReleases = async (releaseDir, db) => {
-  const releasePath = path.resolve(releaseDir); // Convert releaseDir to absolute path
-  console.log('Scanning releases directory:', releasePath); // Debug log the absolute path
+  const releasePath = path.resolve(releaseDir); // Resolve the absolute path for the directory
+  console.log('Scanning releases directory:', releasePath);
 
+  const migrationTasks = []; // Store all migration tasks (promises)
+  
   try {
-    const versions = fs.readdirSync(releasePath); // Read all subdirectories (versions) inside
+    const versions = fs.readdirSync(releasePath); // Get all version subdirectories
+    
     for (const version of versions) {
-      const migrationFilePath = path.join(releasePath, version, 'mongodb.js'); // Locate the mongodb.js file
+      const migrationFilePath = path.join(releasePath, version, 'mongodb.js'); // Compute the path to `mongodb.js`
+
       if (fs.existsSync(migrationFilePath)) {
         console.log(`Applying migration for version: ${version}`);
-        await executeRawCommands(migrationFilePath, db); // Execute the commands in the file
-        console.log(`Migration for version ${version} applied successfully.`);
+        const task = executeRawCommands(migrationFilePath, db); // Start migration as a task
+        migrationTasks.push(task); // Add to the list of tasks
       } else {
         console.warn(`No mongodb.js file found for release version ${version}`);
       }
@@ -51,38 +56,43 @@ const loadAndRunReleases = async (releaseDir, db) => {
     console.error(`Failed to scan or process directory: ${releasePath}`, err);
     throw err;
   }
+
+  // Wait for all migrations in this directory to complete
+  await Promise.all(migrationTasks);
+  console.log(`All migrations for ${releaseDir} completed.`);
 };
 
 // Main function to run migrations
 const runMigrations = async () => {
   try {
-    // Connect to the database
+    // Connect to MongoDB
+    client = new MongoClient(mongoUri); // Initialize MongoDB client
     console.log(`Connecting to MongoDB database: ${dbName}`);
     await client.connect();
     const db = client.db(dbName);
     console.log(`Connected to database: ${dbName}`);
 
-    // Resolve the absolute path to the `releases` folder
-    const baseReleasesPath = path.resolve(__dirname, '../releases');
+    const baseReleasesPath = path.resolve(__dirname, '../releases'); // Base path for releases
 
-    // Start the weekly migrations
+    // Run all weekly migrations
     console.log('Applying Weekly Releases...');
     await loadAndRunReleases(path.join(baseReleasesPath, 'weekly'), db);
 
-    // Start the monthly migrations
+    // Run all monthly migrations
     console.log('Applying Monthly Releases...');
     await loadAndRunReleases(path.join(baseReleasesPath, 'monthly'), db);
 
     console.log('All migrations completed successfully!');
+    
   } catch (err) {
     console.error('❌ Migration failed!', err);
   } finally {
     try {
-      console.log('Closing all sessions and database connections...');
-      await client.close(); // Close the MongoDB client gracefully
+      console.log('Closing database connections...');
+      if (client) await client.close(); // Close the MongoDB client connection
       console.log('🔒 MongoDB connection has been closed.');
     } catch (err) {
-      console.error('Error while closing the MongoDB connection:', err);
+      console.error('Error while closing MongoDB connection:', err);
     }
   }
 };
